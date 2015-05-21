@@ -14,7 +14,7 @@ function cmb2_post_search_render_field( $field, $escaped_value, $object_id, $obj
 
 	echo $field_type->input( array(
 		'data-posttype'   => $field->args( 'post_type' ),
-		'data-selecttype' => 'radio' == $select_type ? 'radio' : 'checkbox',
+		'data-selecttype' => 'checkbox' == $select_type ? 'checkbox' : 'radio',
 	) );
 }
 add_action( 'cmb2_render_post_search_text', 'cmb2_post_search_render_field', 10, 5 );
@@ -141,16 +141,15 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 
 				var search = this;
 				search.$spinner.show();
-
 				$.ajax( ajaxurl, {
 					type     : 'POST',
 					dataType : 'json',
 					data     : {
 						ps               : search.$input.val(),
-						action           : 'find_posts',
+						action           : 'cmb2_post_search_custom',
 						cmb2_post_search : true,
 						post_search_cpt  : search.postType,
-						_ajax_nonce      : $('#_ajax_nonce').val()
+						_ajax_nonce      : $('.find-box-search #_ajax_nonce').val()
 					}
 				}).always( function() {
 
@@ -163,6 +162,8 @@ function cmb2_post_search_render_js(  $cmb_id, $object_id, $object_type, $cmb ) 
 					}
 
 					var data = response.data;
+
+					console.log(data);
 
 					if ( 'checkbox' === search.selectType ) {
 						data = data.replace( /type="radio"/gi, 'type="checkbox"' );
@@ -248,3 +249,64 @@ function cmb2_post_search_wp_ajax_find_posts() {
 	}
 }
 add_action( 'admin_init', 'cmb2_post_search_wp_ajax_find_posts' );
+
+add_action( 'wp_ajax_cmb2_post_search_custom', 'cmb2_post_search_wp_ajax_find_posts_custom' );
+
+function cmb2_post_search_wp_ajax_find_posts_custom() {
+  $post_types = get_post_types( array( 'public' => true ), 'objects' );
+  unset( $post_types['attachment'] );
+
+  $s = wp_unslash( $_POST['ps'] );
+  $args = array(
+      'post_type' => array_keys( $post_types ),
+      'post_status' => 'any',
+      'posts_per_page' => 50,
+  );
+  if ( '' !== $s )
+      $args['s'] = $s;
+
+  $posts = get_posts( $args );
+
+  if ( ! $posts ) {
+      wp_send_json_error( __( 'No items found.' ) );
+  }
+ 
+  $html = '<table class="widefat"><thead><tr><th class="found-radio"><br /></th><th>'.__('Title').'</th><th class="no-break">'.__('Type').'</th><th class="no-break">'.__('Date').'</th><th class="no-break">'.__('Status').'</th></tr></thead><tbody>';
+  $alt = '';
+  foreach ( $posts as $post ) {
+      $title = trim( $post->post_title ) ? $post->post_title : __( '(no title)' );
+      $alt = ( 'alternate' == $alt ) ? '' : 'alternate';
+
+      switch ( $post->post_status ) {
+          case 'publish' :
+          case 'private' :
+              $stat = __('Published');
+              break;
+          case 'future' :
+              $stat = __('Scheduled');
+              break;
+          case 'pending' :
+              $stat = __('Pending Review');
+              break;
+          case 'draft' :
+              $stat = __('Draft');
+              break;
+      }
+
+      if ( '0000-00-00 00:00:00' == $post->post_date ) {
+          $time = '';
+      } else {
+          /* translators: date format in table columns, see http://php.net/date */
+          $time = mysql2date(__('Y/m/d'), $post->post_date);
+      }
+
+      $html .= '<tr class="' . trim( 'found-posts ' . $alt ) . '"><td class="found-radio"><input type="radio" id="found-'.$post->ID.'" name="found_post_id" value="' . esc_attr(get_permalink($post->ID)) . '"></td>';
+      $html .= '<td><label for="found-'.$post->ID.'">' . esc_html( $title ) . '</label></td><td class="no-break">' . esc_html( $post_types[$post->post_type]->labels->singular_name ) . '</td><td class="no-break">'.esc_html( $time ) . '</td><td class="no-break">' . esc_html( $stat ). ' </td></tr>' . "\n\n";
+  }
+
+  $html .= '</tbody></table>';
+
+  wp_send_json_success( $html );
+
+	wp_die(); // this is required to terminate immediately and return a proper response
+}
